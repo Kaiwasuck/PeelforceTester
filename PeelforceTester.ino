@@ -1,52 +1,86 @@
-// Define the pins for the DRV8834 driver
-const int STEP_PIN = 5;
-const int DIR_PIN = 4;
-const int M0_PIN = 6;
-const int M1_PIN = 7;
+/*
+ * Example using non-blocking mode to move until a switch is triggered.
+ *
+ * Copyright (C)2015-2017 Laurentiu Badea
+ *
+ * This file may be redistributed under the terms of the MIT license.
+ * A copy of this license has been included with this distribution in the file LICENSE.
+ */
+#include <Arduino.h>
+
+// this pin should connect to Ground when want to stop the motor
+#define STOPPER_PIN 4
+
+// Motor steps per revolution. Most steppers are 200 steps or 1.8 degrees/step
+#define MOTOR_STEPS 200
+#define RPM 120
+// Microstepping mode. If you hardwired it to save pins, set to the same value here.
+#define MICROSTEPS 1
+
+#define DIR 8
+#define STEP 9
+#define SLEEP 13 // optional (just delete SLEEP from everywhere if not used)
+
+/*
+ * Choose one of the sections below that match your board
+ */
+
+#include "DRV8834.h"
+#define M0 10
+#define M1 11
+DRV8834 stepper(MOTOR_STEPS, DIR, STEP, SLEEP, M0, M1);
+
+
+// #include "BasicStepperDriver.h" // generic
+// BasicStepperDriver stepper(MOTOR_STEPS, DIR, STEP);
 
 void setup() {
-  // Set the pin modes
-  pinMode(STEP_PIN, OUTPUT);
-  pinMode(DIR_PIN, OUTPUT);
-  pinMode(M0_PIN, OUTPUT);
-  pinMode(M1_PIN, OUTPUT);
-  
-  digitalWrite(M0_PIN, LOW);
-  digitalWrite(M1_PIN, LOW);
+    Serial.begin(115200);
 
-  // Start serial communication for debugging
-  Serial.begin(9600);
-  Serial.println("Stepper motor control ready.");
+    // Configure stopper pin to read HIGH unless grounded
+    pinMode(STOPPER_PIN, INPUT_PULLUP);
+
+    stepper.begin(RPM, MICROSTEPS);
+    // if using enable/disable on ENABLE pin (active LOW) instead of SLEEP uncomment next line
+    // stepper.setEnableActiveState(LOW);
+    stepper.enable();
+
+
+    Serial.println("START");
+
+    // set the motor to move continuously for a reasonable time to hit the stopper
+    // let's say 100 complete revolutions (arbitrary number)
+    stepper.startMove(100 * MOTOR_STEPS * MICROSTEPS);     // in microsteps
+    // stepper.startRotate(100 * 360);                     // or in degrees
 }
 
 void loop() {
-  // Rotate 200 steps clockwise (one full revolution for a 200-step motor)
-  Serial.println("Moving clockwise...");
-  moveStepper(200, HIGH, 3000);
-  delay(3000); // Wait for 1 second
+    // first, check if stopper was hit
+    if (digitalRead(STOPPER_PIN) == LOW){
+        Serial.println("STOPPER REACHED");
 
-  // Rotate 200 steps counter-clockwise
-  Serial.println("Moving counter-clockwise...");
-  moveStepper(200, LOW, 3000);
-  delay(3000); // Wait for 1 second
-}
+        /*
+         * Choosing stop() vs startBrake():
+         *
+         * constant speed mode, they are the same (stop immediately)
+         * linear (accelerated) mode with brake, the motor will go past the stopper a bit
+         */
 
-/**
- * Moves the stepper motor a specified number of steps.
- * * @param steps The number of steps to move.
- * @param direction The direction of rotation (HIGH for one direction, LOW for the other).
- * @param stepDelay_us The delay in microseconds between steps.
- */
-void moveStepper(int steps, int direction, int stepDelay_us) {
-  // Set the direction
-  digitalWrite(DIR_PIN, direction);
-  
-  // Loop for the specified number of steps
-  for (int i = 0; i < steps; i++) {
-    // Pulse the STEP pin to make the motor take one step
-    digitalWrite(STEP_PIN, HIGH);
-    delayMicroseconds(stepDelay_us);
-    digitalWrite(STEP_PIN, LOW);
-    delayMicroseconds(stepDelay_us);
-  }
+        stepper.stop();
+        // stepper.startBrake();
+    }
+
+    // motor control loop - send pulse and return how long to wait until next pulse
+    unsigned wait_time_micros = stepper.nextAction();
+
+    // 0 wait time indicates the motor has stopped
+    if (wait_time_micros <= 0) {
+        stepper.disable();       // comment out to keep motor powered
+        delay(3600000);
+    }
+
+    // (optional) execute other code if we have enough time
+    if (wait_time_micros > 100){
+        // other code here
+    }
 }
