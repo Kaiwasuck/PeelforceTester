@@ -50,10 +50,11 @@ void setup() {
     // stepper.setEnableActiveState(LOW);
     stepper.enable();
     delay(1000);
-    calibrate();
     myScale.begin(dataPin, clockPin);
-    myScale.set_offset(0);
-    myScale.set_scale(0.00);
+
+    myScale.set_offset(525556);
+    myScale.set_scale(988.453125);
+    myScale.tare();
 
     Serial.println("START");
 
