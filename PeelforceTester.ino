@@ -1,112 +1,192 @@
-/*
- * Example using non-blocking mode to move until a switch is triggered.
- *
- * Copyright (C)2015-2017 Laurentiu Badea
- *
- * This file may be redistributed under the terms of the MIT license.
- * A copy of this license has been included with this distribution in the file LICENSE.
- */
 #include <Arduino.h>
 #include "HX711.h"
-
-// this pin should connect to Ground when want to stop the motor
-#define STOPPER_PIN 4
-
-// Motor steps per revolution. Most steppers are 200 steps or 1.8 degrees/step
-#define MOTOR_STEPS 200
-#define RPM 100
-// Microstepping mode. If you hardwired it to save pins, set to the same value here.
-#define MICROSTEPS 1
-
-#define DIR 8
-#define STEP 9
-#define SLEEP 13 // optional (just delete SLEEP from everywhere if not used)
-
-/*
- * Choose one of the sections below that match your board
- */
-
 #include "DRV8834.h"
-#define M0 10
-#define M1 11
-DRV8834 stepper(MOTOR_STEPS, DIR, STEP, SLEEP, M0, M1);
+#include <EEPROM.h>
+
+
+// EEPROM definitions
+#define EEPROM_SCALE 0    // int
+#define EEPROM_OFFSET 4   // 16-bit int
+
+
+// Pin Defenitions
+#define DIR 11
+#define STEP 10
+#define M0 8
+#define M1 9
+#define DATAPIN 7
+#define CLOCKPIN 6
+#define UPPERLIMIT 4
+#define LOWERLIMIT 5
+
+
+//////////////////////// Stepper Motor Parameters /////////////////////////////
+// MOTOR_STEPS  - Motor steps per revolution. This stepper is 200 steps or 1.8 
+//                degrees/step
+// RPM          - Rotation/min, change for spd
+// MICROSTEPS   - Microstepping Mode:
+//                  1 : Full Step, 2: 1/2 step, 4: 1/4 step, 8: 1/8 step, 
+//                  16: 1/16 step, 32: 1/32 step
+///////////////////////////////////////////////////////////////////////////////
+#define MOTOR_STEPS 200
+int RPM = 100;
+#define MICROSTEPS 1
+DRV8834 stepper(MOTOR_STEPS, DIR, STEP, M0, M1);
 
 HX711 myScale;
-//  adjust pins if needed.
-uint8_t dataPin = 6;
-uint8_t clockPin = 7;
 
-// #include "BasicStepperDriver.h" // generic
-// BasicStepperDriver stepper(MOTOR_STEPS, DIR, STEP);
+bool testing = false;
+bool resetting = false;
+int direction = 1;
+int timeBetwScale = 1000;
+int resetHeight = 1;
+bool reachedBottom = false;
+unsigned wait_time_micros;
+String incomingCommand = ""; // A string to hold incoming data
+unsigned long startTime;
+bool prevLowerSwitch = false;
+bool prevUpperSwitch = false;
 
 void setup() {
-    Serial.begin(115200);
+  // Initialize Pins
+  pinMode(UPPERLIMIT, INPUT);
+  pinMode(LOWERLIMIT, INPUT);
 
-    // Configure stopper pin to read HIGH unless grounded
-    pinMode(STOPPER_PIN, INPUT_PULLUP);
+  // Initialize Serial
+  Serial.begin(115200);
+  while (!Serial) {
+    delay(50);  // wait for Serial to connect
+  }
+  Serial.setTimeout(100);
+  
 
-    stepper.begin(RPM, MICROSTEPS);
-    // if using enable/disable on ENABLE pin (active LOW) instead of SLEEP uncomment next line
-    // stepper.setEnableActiveState(LOW);
-    stepper.enable();
-    delay(1000);
-    myScale.begin(dataPin, clockPin);
+  // read scale values from EEPROM
+  float scale;
+  EEPROM.get(EEPROM_SCALE, scale);
+  if (isnan(scale)) scale = 988.453125; //scale value
+  int32_t offset;
+  EEPROM.get(EEPROM_OFFSET, offset);
+  if (isnan(offset)) offset = 525556; //scale value
+  // set up scale
+  myScale.begin(DATAPIN, CLOCKPIN);
+  myScale.set_offset(offset);
+  myScale.set_scale(scale);
+  myScale.tare();
 
-    myScale.set_offset(525556);
-    myScale.set_scale(988.453125);
-    myScale.tare();
-
-    Serial.println("START");
-
-    
-
-    // set the motor to move continuously for a reasonable time to hit the stopper
-    // let's say 100 complete revolutions (arbitrary number)
-    stepper.startMove(10 * MOTOR_STEPS * MICROSTEPS);     // in microsteps
-    // stepper.startRotate(100 * 360);                     // or in degrees
+  // Initialize Stepper
+  stepper.begin(RPM, MICROSTEPS);
+  Serial.println("Status: Ready");
 }
 
-int cycle = 1;
+
 void loop() {
-    // first, check if stopper was hit
-    if (digitalRead(STOPPER_PIN) == LOW){
-        Serial.println("STOPPER REACHED");
+  // motor control loop - send pulse and return how long to wait until next pulse
+  wait_time_micros = stepper.nextAction();
 
-        /*
-         * Choosing stop() vs startBrake():
-         *
-         * constant speed mode, they are the same (stop immediately)
-         * linear (accelerated) mode with brake, the motor will go past the stopper a bit
-         */
+  // execute other code in between clock pulses
+  if (wait_time_micros > 100){
+    serialRead();
+    switchLogic();
 
-        stepper.stop();
-        // stepper.startBrake();
-    }
+    if (testing) readScale();
+  } else if (wait_time_micros <= 0){
+    // if the motor is stopped
+    serialRead();
+    switchLogic();
+  }
 
-    // motor control loop - send pulse and return how long to wait until next pulse
-    unsigned wait_time_micros = stepper.nextAction();
-
-    // 0 wait time indicates the motor has stopped
-    if (wait_time_micros <= 0) {
-        stepper.disable();       // comment out to keep motor powered
-        cycle *= -1;
-        stepper.startMove(5 * cycle * MOTOR_STEPS * MICROSTEPS);     // in microsteps
-    }
-
-    // (optional) execute other code if we have enough time
-    if (wait_time_micros > 100){
-        if(millis()-myScale.last_time_read() > 1000){
-            if(myScale.is_ready()){
-                Serial.println(myScale.get_units(5));
-            }
-        }
-    }
 }
 
+void switchLogic(){
+  bool currLowerSwitch = digitalRead(LOWERLIMIT);
+  bool currUpperSwitch = digitalRead(UPPERLIMIT);
 
-void calibrate()
-{
-  Serial.println("\n\nCALIBRATION\n===========");
+  if(!testing && !resetting){    // when idle can use switches to move motor up or down
+    if(currLowerSwitch == HIGH && prevLowerSwitch == LOW){
+      stepper.startMove(1 * MOTOR_STEPS * MICROSTEPS);
+      Serial.println("Status: lowering motor");
+    } else if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
+      stepper.startMove(-1 * MOTOR_STEPS * MICROSTEPS);
+      Serial.println("Status: raising motor");
+    }
+
+  } else if (resetting){     // for resetting back to original position
+    if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
+      stepper.stop();
+      direction = -1;
+      stepper.startMove(direction * resetHeight * MOTOR_STEPS * MICROSTEPS);
+      reachedBottom = true;
+    }
+    if (reachedBottom && wait_time_micros <= 0){
+      resetting = false;
+      reachedBottom = false;
+    }
+
+  } else {              // the code for when the test starts
+    // check if stopper was hit
+    if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
+      Serial.println("Status: TOP REACHED");
+      stepper.stop();
+    } else if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
+      Serial.println("Status: BOTTOM REACHED");
+      stepper.stop();
+    }
+  }
+  if (prevUpperSwitch != currUpperSwitch)   prevUpperSwitch = currUpperSwitch;
+  if (prevLowerSwitch != currLowerSwitch)   prevLowerSwitch = currLowerSwitch;
+}
+
+void readScale(){
+  // get a scale reading and print to serial every timeBetwScale interval
+  if(millis() - myScale.last_time_read() > timeBetwScale){
+    if(myScale.is_ready()){
+      float scaleValue = myScale.get_units(1);
+
+      Serial.print(millis()-startTime);
+      Serial.print(", ");
+      Serial.println(scaleValue);
+    }
+  }
+}
+
+void serialRead(){
+  if (Serial.available() > 0) {
+    incomingCommand = Serial.readStringUntil('\n');
+    incomingCommand.trim(); // Remove any whitespace
+
+    if (incomingCommand == "A") { // START COMMAND
+      testing = true;
+      resetting = false;
+      direction = -1;
+      startTime = millis();
+      stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+      Serial.println("Status: Motor started.");
+
+    } else if (incomingCommand == "B") { // STOP COMMAND
+      testing = false;
+      resetting = false;
+      stepper.stop();
+      Serial.println("Status: Motor stopped.");
+
+    } else if (incomingCommand == "C") { // RESET COMMAND
+      testing = false;
+      resetting = true;
+      direction = 1;
+      stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+      Serial.println("Status: Motor resetting");
+
+    } else if (incomingCommand == "D") { // Calibrate Load Cell
+      testing = false;
+      resetting = false;
+      stepper.stop();
+      Serial.println("Status: Calibrating Load Cell");
+      calibrate();
+    }
+  }
+}
+
+void calibrate(){
+  Serial.println("\nCALIBRATION\n===========");
   Serial.println("remove all weight from the loadcell");
   //  flush Serial input
   while (Serial.available()) Serial.read();
@@ -118,7 +198,7 @@ void calibrate()
   //  average 20 measurements.
   myScale.tare(20);
   int32_t offset = myScale.get_offset();
-
+  EEPROM.put(EEPROM_OFFSET, offset);
   Serial.print("OFFSET: ");
   Serial.println(offset);
   Serial.println();
@@ -130,13 +210,10 @@ void calibrate()
 
   Serial.println("enter the weight in (whole) grams and press enter");
   uint32_t weight = 0;
-  while (Serial.peek() != '\n')
-  {
-    if (Serial.available())
-    {
+  while (Serial.peek() != '\n'){
+    if (Serial.available()){
       char ch = Serial.read();
-      if (isdigit(ch))
-      {
+      if (isdigit(ch)){
         weight *= 10;
         weight = weight + (ch - '0');
       }
@@ -146,6 +223,7 @@ void calibrate()
   Serial.println(weight);
   myScale.calibrate_scale(weight, 20);
   float scale = myScale.get_scale();
+  EEPROM.put(EEPROM_SCALE, scale);
 
   Serial.print("SCALE:  ");
   Serial.println(scale, 6);
@@ -154,8 +232,6 @@ void calibrate()
   Serial.print(offset);
   Serial.print("); and scale.set_scale(");
   Serial.print(scale, 6);
-  Serial.print(");\n");
-  Serial.println("in the setup of your project");
+  Serial.print(");\n\n");
 
-  Serial.println("\n\n");
 }

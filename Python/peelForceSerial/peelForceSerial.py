@@ -35,11 +35,9 @@ try:
                 line = ser.readline().decode('utf-8').strip()
 
                 if line:
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
                     # Log the timestamp and data to the CSV file
-                    csv_writer.writerow([timestamp, line])
-                    print(f"Logged: {timestamp}, {line}")
+                    csv_writer.writerow(line)
+                    print(f"Logged: {line}")
 
             time.sleep(0.01)  # Small delay to prevent busy-waiting
 
