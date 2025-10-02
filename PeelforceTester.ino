@@ -38,7 +38,7 @@ HX711 myScale;
 bool testing = false;
 bool resetting = false;
 int direction = 1;
-int timeBetwScale = 1000;
+int loggingInterval = 1000;
 int resetHeight = 1;
 bool reachedBottom = false;
 unsigned wait_time_micros;
@@ -137,8 +137,8 @@ void switchLogic(){
 }
 
 void readScale(){
-  // get a scale reading and print to serial every timeBetwScale interval
-  if(millis() - myScale.last_time_read() > timeBetwScale){
+  // get a scale reading and print to serial every loggingInterval
+  if(millis() - myScale.last_time_read() > loggingInterval){
     if(myScale.is_ready()){
       float scaleValue = myScale.get_units(1);
 
@@ -153,34 +153,59 @@ void serialRead(){
   if (Serial.available() > 0) {
     incomingCommand = Serial.readStringUntil('\n');
     incomingCommand.trim(); // Remove any whitespace
+    
+    if (incomingCommand.length() > 0) {
+      char commandType = incomingCommand.charAt(0); // Get the command character
+      String commandValue = incomingCommand.substring(1); // Get the value after the character
 
-    if (incomingCommand == "A") { // START COMMAND
-      testing = true;
-      resetting = false;
-      direction = -1;
-      startTime = millis();
-      stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
-      Serial.println("Status: Motor started.");
+      switch (commandType){
+        case 'A': // Start Motor
+          testing = true;
+          resetting = false;
+          direction = -1;
+          startTime = millis();
+          stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+          Serial.println("Status: Motor started.");
+          break;
 
-    } else if (incomingCommand == "B") { // STOP COMMAND
-      testing = false;
-      resetting = false;
-      stepper.stop();
-      Serial.println("Status: Motor stopped.");
+        case 'B': // Stop Motor
+          testing = false;
+          resetting = false;
+          stepper.stop();
+          Serial.println("Status: Motor stopped.");
+          break;
 
-    } else if (incomingCommand == "C") { // RESET COMMAND
-      testing = false;
-      resetting = true;
-      direction = 1;
-      stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
-      Serial.println("Status: Motor resetting");
+        case 'C': // Reset Position
+          testing = false;
+          resetting = true;
+          direction = 1;
+          stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+          Serial.println("Status: Motor resetting");
+          break;
 
-    } else if (incomingCommand == "D") { // Calibrate Load Cell
-      testing = false;
-      resetting = false;
-      stepper.stop();
-      Serial.println("Status: Calibrating Load Cell");
-      calibrate();
+        case 'D': // calibrate
+          testing = false;
+          resetting = false;
+          stepper.stop();
+          Serial.println("Status: Calibrating Load Cell");
+          calibrate();
+          break;
+
+        case 'R': // Set RPM
+          RPM = commandValue.toInt();
+          Serial.println("Status: RPM set to " + String(motorRPM));
+          // Add code to update your motor's speed here
+          break;
+
+        case 'I': // Set Interval
+          loggingInterval = commandValue.toInt();
+          Serial.println("Status: Logging interval set to " + String(loggingInterval) + " ms");
+          break;
+          
+        default:
+          Serial.println("Error: Unknown command");
+          break;
+      }
     }
   }
 }
