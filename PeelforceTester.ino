@@ -35,6 +35,7 @@ DRV8834 stepper(MOTOR_STEPS, DIR, STEP, M0, M1);
 
 HX711 myScale;
 
+
 bool testing = false;
 bool resetting = false;
 int direction = 1;
@@ -193,7 +194,8 @@ void serialRead(){
 
         case 'R': // Set RPM
           RPM = commandValue.toInt();
-          Serial.println("Status: RPM set to " + String(motorRPM));
+          stepper.setRPM(RPM);
+          Serial.println("Status: RPM set to " + String(RPM));
           // Add code to update your motor's speed here
           break;
 
@@ -211,8 +213,8 @@ void serialRead(){
 }
 
 void calibrate(){
-  Serial.println("\nCALIBRATION\n===========");
-  Serial.println("remove all weight from the loadcell");
+  Serial.println("\n==========CALIBRATION==========");
+  Serial.print("remove all weight from the loadcell");
   //  flush Serial input
   while (Serial.available()) Serial.read();
 
@@ -229,7 +231,7 @@ void calibrate(){
   Serial.println();
 
 
-  Serial.println("place a weight on the loadcell");
+  Serial.println("Place a weight on the loadcell and");
   //  flush Serial input
   while (Serial.available()) Serial.read();
 
@@ -253,10 +255,12 @@ void calibrate(){
   Serial.print("SCALE:  ");
   Serial.println(scale, 6);
 
-  Serial.print("\nuse scale.set_offset(");
+  Serial.print("\nLoad Cell offset set to: ");
   Serial.print(offset);
-  Serial.print("); and scale.set_scale(");
+  Serial.print(" and Load Cell scale set to: ");
   Serial.print(scale, 6);
   Serial.print(");\n\n");
+
+  Serial.println("CALIBRATION: Finished!"); 
 
 }
