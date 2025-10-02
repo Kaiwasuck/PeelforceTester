@@ -142,10 +142,11 @@ void readScale(){
   if(millis() - myScale.last_time_read() > loggingInterval){
     if(myScale.is_ready()){
       float scaleValue = myScale.get_units(1);
+      float force = scaleValue / 1000 * 9.80665; // convert grams to Newtons
 
       Serial.print(millis()-startTime);
       Serial.print(", ");
-      Serial.println(scaleValue);
+      Serial.println(force);
     }
   }
 }
