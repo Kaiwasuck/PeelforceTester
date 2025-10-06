@@ -9,6 +9,7 @@ from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout,
                                QWidget, QTextEdit, QComboBox, QLabel, QHBoxLayout,
                                QFileDialog, QLineEdit, QDialog)
+from pathlib import Path
 
 
 # --- Calibration Dialog Box ---
@@ -125,6 +126,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.central_widget)
         layout = QVBoxLayout(self.central_widget)
         layout.setSpacing(10)
+        self.last_save_directory = str(Path.home())
+
 
         port_layout = QHBoxLayout()
         self.port_label = QLabel("Serial Port:")
@@ -262,16 +265,19 @@ class MainWindow(QMainWindow):
 
     def toggle_logging(self):
         if not self.is_logging:
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save Log File", "", "CSV Files (*.csv);;All Files (*)")
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save Log File", self.last_save_directory, "CSV Files (*.csv);;All Files (*)")
             if file_path:
+                self.last_save_directory = str(Path(file_path).parent)
                 self.csv_file = open(file_path, 'w', newline='', encoding='utf-8')
                 self.csv_writer = csv.writer(self.csv_file)
-                self.csv_writer.writerow(['Timestamp', 'Position', 'Force'])
+                self.log_message("Started Logging.")
+                self.csv_writer.writerow(['Timestamp', 'Time Since Start (ms)', 'Force (N)'])
                 self.is_logging = True
                 self.log_button.setText("Stop Logging")
         else:
             if self.csv_file: self.csv_file.close()
             self.is_logging = False
+            self.log_message("Stopped Logging.")
             self.log_button.setText("Start Logging")
 
     def set_rpm(self):
