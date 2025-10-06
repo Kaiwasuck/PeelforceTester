@@ -1,3 +1,0 @@
-([('peelForceSerial',
-   '/Users/kaiiwasaki/Documents/GitHub/PeelforceTester/Python/peelForceSerial/dist/peelForceSerial',
-   'EXECUTABLE')],)
