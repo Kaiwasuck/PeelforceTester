@@ -1,4 +1,4 @@
-#Peel Force Tester
+# Peel Force Tester
 
 Uses the Polulu DRV8834 motor controller board to control a stepper motor and a HX711 24bit ADC to measure force data.
 
