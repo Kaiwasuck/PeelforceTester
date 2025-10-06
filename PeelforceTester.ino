@@ -10,6 +10,7 @@
 
 
 // Pin Defenitions
+#define ENABLE 12
 #define DIR 11
 #define STEP 10
 #define M0 8
@@ -31,7 +32,7 @@
 #define MOTOR_STEPS 200
 int RPM = 100;
 #define MICROSTEPS 1
-DRV8834 stepper(MOTOR_STEPS, DIR, STEP, M0, M1);
+DRV8834 stepper(MOTOR_STEPS, DIR, STEP, ENABLE, M0, M1);
 
 HX711 myScale;
 
@@ -75,7 +76,9 @@ void setup() {
   myScale.tare();
 
   // Initialize Stepper
+  stepper.setEnableActiveState(LOW);
   stepper.begin(RPM, MICROSTEPS);
+  stepper.disable();
   Serial.println("Status: Ready");
 }
 
@@ -104,23 +107,28 @@ void switchLogic(){
 
   if(!testing && !resetting){    // when idle can use switches to move motor up or down
     if(currLowerSwitch == HIGH && prevLowerSwitch == LOW){
-      stepper.startMove(1 * MOTOR_STEPS * MICROSTEPS);
+      stepper.enable();
+      stepper.startMove(20 * MOTOR_STEPS * stepper.getMicrostep());
       Serial.println("Status: lowering motor");
     } else if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
-      stepper.startMove(-1 * MOTOR_STEPS * MICROSTEPS);
+      stepper.enable();
+      stepper.startMove(-20 * MOTOR_STEPS * stepper.getMicrostep());
       Serial.println("Status: raising motor");
+    } else if (currUpperSwitch == LOW && currLowerSwitch == LOW && (prevUpperSwitch == HIGH || prevLowerSwitch == HIGH)){
+      stepper.disable();
     }
 
   } else if (resetting){     // for resetting back to original position
     if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
       stepper.stop();
       direction = -1;
-      stepper.startMove(direction * resetHeight * MOTOR_STEPS * MICROSTEPS);
+      stepper.startMove(direction * resetHeight * MOTOR_STEPS * stepper.getMicrostep());
       reachedBottom = true;
     }
     if (reachedBottom && wait_time_micros <= 0){
       resetting = false;
       reachedBottom = false;
+      stepper.disable();
     }
 
   } else {              // the code for when the test starts
@@ -128,9 +136,11 @@ void switchLogic(){
     if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
       Serial.println("Status: TOP REACHED");
       stepper.stop();
+      stepper.disable();
     } else if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
       Serial.println("Status: BOTTOM REACHED");
       stepper.stop();
+      stepper.disable();
     }
   }
   if (prevUpperSwitch != currUpperSwitch)   prevUpperSwitch = currUpperSwitch;
@@ -166,7 +176,8 @@ void serialRead(){
           resetting = false;
           direction = -1;
           startTime = millis();
-          stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+          stepper.enable();
+          stepper.startMove(direction * 100 * MOTOR_STEPS * stepper.getMicrostep());
           Serial.println("Status: Motor started.");
           break;
 
@@ -174,6 +185,7 @@ void serialRead(){
           testing = false;
           resetting = false;
           stepper.stop();
+          stepper.disable();
           Serial.println("Status: Motor stopped.");
           break;
 
@@ -181,7 +193,8 @@ void serialRead(){
           testing = false;
           resetting = true;
           direction = 1;
-          stepper.startMove(direction * 100 * MOTOR_STEPS * MICROSTEPS);
+          stepper.enable();
+          stepper.startMove(direction * 100 * MOTOR_STEPS * stepper.getMicrostep());
           Serial.println("Status: Motor resetting");
           break;
 
@@ -189,6 +202,7 @@ void serialRead(){
           testing = false;
           resetting = false;
           stepper.stop();
+          stepper.disable();
           Serial.println("Status: Calibrating Load Cell");
           calibrate();
           break;
@@ -197,7 +211,7 @@ void serialRead(){
           RPM = commandValue.toInt();
           stepper.setRPM(RPM);
           Serial.println("Status: RPM set to " + String(RPM));
-          // Add code to update your motor's speed here
+          if (RPM < 80) stepper.setMicrostep(4);
           break;
 
         case 'I': // Set Interval
