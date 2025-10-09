@@ -137,10 +137,12 @@ void switchLogic(){
       Serial.println("Status: TOP REACHED");
       stepper.stop();
       stepper.disable();
+      testing = false;
     } else if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
       Serial.println("Status: BOTTOM REACHED");
       stepper.stop();
       stepper.disable();
+      testing = false;
     }
   }
   if (prevUpperSwitch != currUpperSwitch)   prevUpperSwitch = currUpperSwitch;
@@ -157,6 +159,14 @@ void readScale(){
       Serial.print(millis()-startTime);
       Serial.print(", ");
       Serial.println(force);
+
+      if (scaleValue > 800){
+        // if measured a force that is greater than 80% of max load
+        Serial.println("Max Load Exceeded");
+        stepper.stop();
+        stepper.disable();
+        testing = false;
+      }
     }
   }
 }
@@ -217,6 +227,14 @@ void serialRead(){
         case 'I': // Set Interval
           loggingInterval = commandValue.toInt();
           Serial.println("Status: Logging interval set to " + String(loggingInterval) + " ms");
+          break;
+
+        case 'S':
+          // Send current settings back in a parseable format
+          Serial.print("R:");
+          Serial.print(stepper.getCurrentRPM());
+          Serial.print(",I:");
+          Serial.println(loggingInterval);
           break;
           
         default:
