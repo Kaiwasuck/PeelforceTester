@@ -42,7 +42,7 @@ bool resetting = false;
 int direction = 1;
 int loggingInterval = 1000;
 int resetHeight = 1;
-bool reachedBottom = false;
+bool reachedEnd = false;
 unsigned wait_time_micros;
 String incomingCommand = ""; // A string to hold incoming data
 unsigned long startTime;
@@ -105,17 +105,29 @@ void switchLogic(){
   bool currLowerSwitch = digitalRead(LOWERLIMIT);
   bool currUpperSwitch = digitalRead(UPPERLIMIT);
 
-  if(!testing && !resetting){    // when idle can use switches to move motor up or down
-    if(currLowerSwitch == HIGH && prevLowerSwitch == LOW){
-      stepper.enable();
-      stepper.startMove(20 * MOTOR_STEPS * stepper.getMicrostep());
-      Serial.println("Status: lowering motor");
-    } else if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
-      stepper.enable();
-      stepper.startMove(-20 * MOTOR_STEPS * stepper.getMicrostep());
-      Serial.println("Status: raising motor");
-    } else if (currUpperSwitch == LOW && currLowerSwitch == LOW && (prevUpperSwitch == HIGH || prevLowerSwitch == HIGH)){
+  if (reachedEnd){
+    // disable stepper after reaching end and moving back 1 rotation
+    if (wait_time_micros <= 0){
+      reachedEnd = false;
       stepper.disable();
+    }
+
+  } else if (testing) {              // the code for peel force testing
+    // check if stopper was hit
+    if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
+      Serial.println("Status: TOP REACHED");
+      stepper.stop();
+      direction = 1;
+      stepper.startMove(direction * resetHeight * MOTOR_STEPS * stepper.getMicrostep());
+      reachedEnd = true;
+      testing = false;
+
+    } else if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
+      Serial.println("Status: BOTTOM REACHED");
+      direction = -1;
+      stepper.startMove(direction * resetHeight * MOTOR_STEPS * stepper.getMicrostep());
+      reachedEnd = true;
+      testing = false;
     }
 
   } else if (resetting){     // for resetting back to original position
@@ -123,28 +135,34 @@ void switchLogic(){
       stepper.stop();
       direction = -1;
       stepper.startMove(direction * resetHeight * MOTOR_STEPS * stepper.getMicrostep());
-      reachedBottom = true;
-    }
-    if (reachedBottom && wait_time_micros <= 0){
+      reachedEnd = true;
       resetting = false;
-      reachedBottom = false;
-      stepper.disable();
     }
-
-  } else {              // the code for when the test starts
-    // check if stopper was hit
-    if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
-      Serial.println("Status: TOP REACHED");
+    
+  } else {    // when idle 
+    //can use switches to move motor up or down
+    if (currUpperSwitch == HIGH && currLowerSwitch == HIGH){
+      // stop and rewind 1 rotation if hit an end stopper
       stepper.stop();
+      stepper.startMove(-1 * direction * resetHeight * MOTOR_STEPS * stepper.getMicrostep());
+      reachedEnd = true;
+    
+    } else if(currLowerSwitch == HIGH && prevLowerSwitch == LOW){
+      stepper.enable();
+      direction = -1;
+      stepper.startMove(direction * 20 * MOTOR_STEPS * stepper.getMicrostep());
+      Serial.println("Status: raising stage");
+    } else if (currUpperSwitch == HIGH && prevUpperSwitch == LOW){
+      stepper.enable();
+      direction = 1;
+      stepper.startMove(direction * 20 * MOTOR_STEPS * stepper.getMicrostep());
+      Serial.println("Status: lowering stage");
+    } else if (currUpperSwitch == LOW && currLowerSwitch == LOW && (prevUpperSwitch == HIGH || prevLowerSwitch == HIGH)){
+      // stop if switch let go
       stepper.disable();
-      testing = false;
-    } else if (currLowerSwitch == HIGH && prevLowerSwitch == LOW){
-      Serial.println("Status: BOTTOM REACHED");
-      stepper.stop();
-      stepper.disable();
-      testing = false;
     }
   }
+
   if (prevUpperSwitch != currUpperSwitch)   prevUpperSwitch = currUpperSwitch;
   if (prevLowerSwitch != currLowerSwitch)   prevLowerSwitch = currLowerSwitch;
 }
