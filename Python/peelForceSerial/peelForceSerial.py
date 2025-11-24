@@ -1,6 +1,6 @@
 import csv
 import sys
-import json  # NEW
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -36,11 +36,17 @@ class CalibrationDialog(QDialog):
         self.finish_button.clicked.connect(self.close)
         self.user_input.returnPressed.connect(self.send_input_to_arduino)
 
-    def start_calibration(self):
+    def start_calibration(self, initial_message=None):
         self.serial_worker.data_received.connect(self.handle_serial_data)
+
+        # If a message was passed, show it in the log immediately
+        if initial_message and isinstance(initial_message, str):
+            self.log.append(f"<b>INFO: {initial_message}</b>")
+            self.log.append("-" * 30)
+
         self.serial_worker.send_command("D\n")
         self.user_input.setFocus()
-        self.show()
+        self.exec()
 
     def handle_serial_data(self, message):
         self.log.append(message)
@@ -102,7 +108,6 @@ class SerialWorker(QThread):
         self.wait()
 
 
-# --- Main GUI Window ---
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -113,10 +118,11 @@ class MainWindow(QMainWindow):
         self.csv_file = None
         self.csv_writer = None
 
-        # --- Settings Management ---
+        self.programmatic_update = False
+
         self.settings_file = Path.home() / ".peel_force_tester_settings.json"
-        self.save_directory = str(Path.home() / "Downloads")  # Default value
-        self.load_settings()  # Load saved settings on startup
+        self.save_directory = str(Path.home() / "Downloads")
+        self.load_settings()
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -131,9 +137,11 @@ class MainWindow(QMainWindow):
         port_layout.addWidget(self.port_combo)
         port_layout.addWidget(self.refresh_button)
         layout.addLayout(port_layout)
+
         self.connect_button = QPushButton("Connect")
         layout.addWidget(self.connect_button)
         self.int_validator = QIntValidator()
+
         rpm_layout = QHBoxLayout()
         self.rpm_label = QLabel("Motor RPM:")
         self.rpm_input = QLineEdit("100")
@@ -143,6 +151,7 @@ class MainWindow(QMainWindow):
         rpm_layout.addWidget(self.rpm_input)
         rpm_layout.addWidget(self.set_rpm_button)
         layout.addLayout(rpm_layout)
+
         interval_layout = QHBoxLayout()
         self.interval_label = QLabel("Logging Interval (ms) [fastest = 100 ms]:")
         self.interval_input = QLineEdit("1000")
@@ -152,31 +161,49 @@ class MainWindow(QMainWindow):
         interval_layout.addWidget(self.interval_input)
         interval_layout.addWidget(self.set_interval_button)
         layout.addLayout(interval_layout)
+
+        loadcell_layout = QHBoxLayout()
+        self.loadcell_label = QLabel("Load Cell Rating:")
+        self.loadcell_combo = QComboBox()
+        load_cell_options = [1, 5, 10]
+        for rating in load_cell_options:
+            self.loadcell_combo.addItem(f"{rating} kg", rating)
+        loadcell_layout.addWidget(self.loadcell_label)
+        loadcell_layout.addWidget(self.loadcell_combo)
+        layout.addLayout(loadcell_layout)
+
         save_layout = QHBoxLayout()
         self.save_location_button = QPushButton("Set Save Location")
         self.calibrate_button = QPushButton("Calibrate Scale")
         save_layout.addWidget(self.save_location_button)
         save_layout.addWidget(self.calibrate_button)
         layout.addLayout(save_layout)
+
         self.save_location_label = QLabel(f"Saving to: {self.save_directory}")
         self.save_location_label.setWordWrap(True)
         layout.addWidget(self.save_location_label)
+
         self.start_button = QPushButton("Start Motor")
         self.stop_button = QPushButton("Stop Motor")
         self.reset_button = QPushButton("Reset Position")
+
         self.controls = [self.rpm_input, self.set_rpm_button, self.interval_input, self.set_interval_button,
                          self.save_location_button, self.calibrate_button, self.start_button, self.stop_button,
-                         self.reset_button]
+                         self.reset_button, self.loadcell_combo]
+
         for control in self.controls:
             control.setEnabled(False)
+
         control_layout = QHBoxLayout()
         control_layout.addWidget(self.start_button)
         control_layout.addWidget(self.stop_button)
         layout.addLayout(control_layout)
         layout.addWidget(self.reset_button)
+
         self.log_display = QTextEdit()
         self.log_display.setReadOnly(True)
         layout.addWidget(self.log_display)
+
         self.refresh_button.clicked.connect(self.populate_ports)
         self.connect_button.clicked.connect(self.toggle_connection)
         self.start_button.clicked.connect(self.start_motor)
@@ -185,20 +212,20 @@ class MainWindow(QMainWindow):
         self.save_location_button.clicked.connect(self.select_save_location)
         self.set_rpm_button.clicked.connect(self.set_rpm)
         self.set_interval_button.clicked.connect(self.set_interval)
-        self.calibrate_button.clicked.connect(self.open_calibration_dialog)
+        self.loadcell_combo.currentIndexChanged.connect(self.on_loadcell_changed)
+
+        self.calibrate_button.clicked.connect(lambda: self.open_calibration_dialog())
+
         self.populate_ports()
 
-    # --- Functions to load and save settings ---
     def load_settings(self):
         try:
             with open(self.settings_file, 'r') as f:
                 settings = json.load(f)
-                # Ensure the loaded path is a valid directory, otherwise keep default
                 saved_path = settings.get("save_directory", self.save_directory)
                 if Path(saved_path).is_dir():
                     self.save_directory = saved_path
         except (FileNotFoundError, json.JSONDecodeError):
-            # File doesn't exist or is empty/corrupt, use defaults
             pass
 
     def save_settings(self):
@@ -215,24 +242,48 @@ class MainWindow(QMainWindow):
             self.save_location_label.setText(f"Saving to: {self.save_directory}")
 
     def closeEvent(self, event):
-        self.save_settings()  # Save settings before closing
+        self.save_settings()
         if self.motor_is_running:
             self.stop_motor()
         if self.serial_worker and self.serial_worker.isRunning():
             self.serial_worker.stop()
         event.accept()
 
+    def on_loadcell_changed(self):
+        if self.programmatic_update:
+            return
+
+        rating = self.loadcell_combo.currentData()
+
+        if self.serial_worker:
+            self.serial_worker.send_command(f"L{rating}\n")
+            self.log_message(f"Load cell changed to {rating}kg. Please Calibrate.")
+
+            blurb = f"Load cell rating changed to {rating}kg. Recalibration is required."
+            self.open_calibration_dialog(message=blurb)
+
     @Slot(str)
     def log_message(self, message):
-        if message.startswith("R:") and ",I:" in message:
+        if message.startswith("R:") and ",I:" in message and ",L:" in message:
             self.log_display.append(f"Received Settings: {message}")
             try:
                 parts = message.split(',')
                 rpm_part = parts[0].split(':')[1]
                 interval_part = parts[1].split(':')[1]
+                loadcell_part = parts[2].split(':')[1]
+
                 self.rpm_input.setText(rpm_part)
                 self.interval_input.setText(interval_part)
-            except IndexError:
+
+                self.programmatic_update = True
+                index = self.loadcell_combo.findData(int(loadcell_part))
+                if index >= 0:
+                    self.loadcell_combo.setCurrentIndex(index)
+                else:
+                    self.log_display.append(f"Warning: Load cell rating {loadcell_part}kg not in dropdown.")
+                self.programmatic_update = False
+
+            except (IndexError, ValueError):
                 self.log_display.append("Error: Could not parse settings from Arduino.")
             return
 
@@ -277,7 +328,7 @@ class MainWindow(QMainWindow):
         self.csv_file = None
         self.csv_writer = None
 
-    def open_calibration_dialog(self):
+    def open_calibration_dialog(self, message=None):
         if self.serial_worker:
             try:
                 self.serial_worker.data_received.disconnect(self.log_message)
@@ -285,7 +336,8 @@ class MainWindow(QMainWindow):
                 pass
             dialog = CalibrationDialog(self.serial_worker, self)
             dialog.finished.connect(lambda: self.serial_worker.data_received.connect(self.log_message))
-            dialog.start_calibration()
+
+            dialog.start_calibration(initial_message=message)
 
     @Slot(bool)
     def on_connection_status_changed(self, is_connected):
