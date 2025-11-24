@@ -7,6 +7,7 @@
 // EEPROM definitions
 #define EEPROM_SCALE 0    // int
 #define EEPROM_OFFSET 4   // 16-bit int
+#define EEPROM_LOADCELL 8 // int
 
 
 // Pin Defenitions
@@ -48,6 +49,7 @@ String incomingCommand = ""; // A string to hold incoming data
 unsigned long startTime;
 bool prevLowerSwitch = false;
 bool prevUpperSwitch = false;
+int maxScaleVal; // in kg
 
 void setup() {
   // Initialize Pins
@@ -68,7 +70,11 @@ void setup() {
   if (isnan(scale)) scale = 988.453125; //scale value
   int32_t offset;
   EEPROM.get(EEPROM_OFFSET, offset);
-  if (isnan(offset)) offset = 525556; //scale value
+  if (isnan(offset)) offset = 525556; //offset value
+  EEPROM.get(EEPROM_LOADCELL, maxScaleVal);
+  if (isnan(maxScaleVal)) maxScaleVal = 1; //default is the 1 kg load cell
+
+
   // set up scale
   myScale.begin(DATAPIN, CLOCKPIN);
   myScale.set_offset(offset);
@@ -178,7 +184,7 @@ void readScale(){
       Serial.print(", ");
       Serial.println(force);
 
-      if (scaleValue > 800){
+      if (scaleValue > maxScaleVal * 800){ // maxScaleVal in kg
         // if measured a force that is greater than 80% of max load
         Serial.println("Max Load Exceeded");
         stepper.stop();
@@ -252,9 +258,19 @@ void serialRead(){
           Serial.print("R:");
           Serial.print(stepper.getCurrentRPM());
           Serial.print(",I:");
-          Serial.println(loggingInterval);
+          Serial.print(loggingInterval);
+          Serial.print(",L:");
+          Serial.println(maxScaleVal);
           break;
           
+        case 'L':
+          // Receive info on the load cell being hooked up to the peel force tester
+          maxScaleVal = commandValue.toInt();
+          Serial.print(maxScaleVal);
+          Serial.println("kg Load Cell settings loaded.");
+          EEPROM.put(EEPROM_LOADCELL, maxScaleVal);
+          break;
+
         default:
           Serial.println("Error: Unknown command");
           break;
