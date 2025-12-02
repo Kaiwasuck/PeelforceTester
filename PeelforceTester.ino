@@ -7,7 +7,9 @@
 // EEPROM definitions
 #define EEPROM_SCALE 0    // int
 #define EEPROM_OFFSET 4   // 16-bit int
-#define EEPROM_LOADCELL 8 // int
+#define EEPROM_LOADCELL 8 // 32-bit nt
+#define EEPROM_RPM 16  // int
+#define EEPROM_INTERVAL 20 // int
 
 
 // Pin Defenitions
@@ -31,7 +33,6 @@
 //                  16: 1/16 step, 32: 1/32 step
 ///////////////////////////////////////////////////////////////////////////////
 #define MOTOR_STEPS 200
-int RPM = 100;
 #define MICROSTEPS 1
 DRV8834 stepper(MOTOR_STEPS, DIR, STEP, ENABLE, M0, M1);
 
@@ -41,7 +42,6 @@ HX711 myScale;
 bool testing = false;
 bool resetting = false;
 int direction = 1;
-int loggingInterval = 1000;
 int resetHeight = 1;
 bool reachedEnd = false;
 unsigned wait_time_micros;
@@ -50,6 +50,9 @@ unsigned long startTime;
 bool prevLowerSwitch = false;
 bool prevUpperSwitch = false;
 int maxScaleVal; // in kg
+int RPM;
+int loggingInterval;
+
 
 void setup() {
   // Initialize Pins
@@ -71,9 +74,15 @@ void setup() {
   int32_t offset;
   EEPROM.get(EEPROM_OFFSET, offset);
   if (isnan(offset)) offset = 525556; //offset value
+
   EEPROM.get(EEPROM_LOADCELL, maxScaleVal);
   if (isnan(maxScaleVal)) maxScaleVal = 1; //default is the 1 kg load cell
 
+  EEPROM.get(EEPROM_RPM, RPM);
+  if (isnan(RPM)) RPM = 76; //default is the 76 rpm for 6in/min
+
+  EEPROM.get(EEPROM_INTERVAL, loggingInterval);
+  if (isnan(loggingInterval)) loggingInterval = 100; //default is to sample 10 times a sec
 
   // set up scale
   myScale.begin(DATAPIN, CLOCKPIN);
@@ -244,19 +253,21 @@ void serialRead(){
         case 'R': // Set RPM
           RPM = commandValue.toInt();
           stepper.setRPM(RPM);
+          EEPROM.put(EEPROM_RPM, RPM);  // store new RPM into EEPROM
           Serial.println("Status: RPM set to " + String(RPM));
           if (RPM < 80) stepper.setMicrostep(4);
           break;
 
         case 'I': // Set Interval
           loggingInterval = commandValue.toInt();
+          EEPROM.put(EEPROM_INTERVAL, loggingInterval); // store new logging interval into EEPROM
           Serial.println("Status: Logging interval set to " + String(loggingInterval) + " ms");
           break;
 
         case 'S':
           // Send current settings back in a parseable format
           Serial.print("R:");
-          Serial.print(stepper.getCurrentRPM());
+          Serial.print(RPM);
           Serial.print(",I:");
           Serial.print(loggingInterval);
           Serial.print(",L:");
